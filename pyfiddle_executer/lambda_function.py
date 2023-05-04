@@ -27,43 +27,31 @@ def execute(event):
     remove_dirs.communicate()
     data = event["code"]
     fil_path = "/tmp/"
-    fil = open(fil_path+"main.py", "wb")
-    fil.write("import sys")
-    fil.write("\n")
-    fil.write("sys.path.append('../var/task/')")
-    fil.write("\n")
-    fil.write(data)
-    fil.close()
+    with open(f"{fil_path}main.py", "wb") as fil:
+        fil.write("import sys")
+        fil.write("\n")
+        fil.write("sys.path.append('../var/task/')")
+        fil.write("\n")
+        fil.write(data)
     args_string = event["commands"]
-    if args_string != "":
-        args = args_string.split(",")
-    else:
-        args = []
-    arg_string = ''
-    for arg in args:
-        arg_string += " "+arg
-    cmd = "sh -c 'cd /tmp/; python main.py"+arg_string+"'"
+    args = args_string.split(",") if args_string != "" else []
+    arg_string = ''.join(f" {arg}" for arg in args)
+    cmd = f"sh -c 'cd /tmp/; python main.py{arg_string}'"
     packages_string = event["packages"]
     package_error_true = True
     if packages_string != "":
         packages = packages_string.split(",")[:5]
         sys.path.append(".")
         for package in packages:
-            can_install = True
-            for item in IGNORE_PACKAGES:
-                if item in package:
-                    can_install = False
+            can_install = all(item not in package for item in IGNORE_PACKAGES)
             if can_install:
                 pip.main(["install", '-t', fil_path, package])
-    input_string = ''
-    for inp in event["inputs"].split(","):
-        input_string += str(inp)+"\n"
+    input_string = ''.join(str(inp)+"\n" for inp in event["inputs"].split(","))
     ret = {}
-    if "fiddle_id" in event:
-        if event["files_binary"]:
-            file_create = _create_local_files_from_binary(
-                event["files_binary"], fil_path)
-            ret["files"] = file_create
+    if "fiddle_id" in event and event["files_binary"]:
+        file_create = _create_local_files_from_binary(
+            event["files_binary"], fil_path)
+        ret["files"] = file_create
     _remove_envs()
     _write_envs(event.get('envs', ""))
     p = Popen(
@@ -86,9 +74,8 @@ def execute(event):
 def _create_local_files_from_binary(files, fil_path):
     try:
         for fil_name in files:
-            fil = open(fil_path+fil_name, "wb")
-            fil.write(base64.b64decode(files[fil_name]))
-            fil.close()
+            with open(fil_path+fil_name, "wb") as fil:
+                fil.write(base64.b64decode(files[fil_name]))
     except:
         return False
     else:
@@ -98,7 +85,7 @@ def _create_local_files_from_binary(files, fil_path):
 def _write_envs(envs_string):
     envs = envs_string.split(',')
     if len(envs) % 2 == 0:
-        env_keys = envs[0::2]
+        env_keys = envs[::2]
         env_values = envs[1::2]
         tuple_envs = zip(env_keys, env_values)
         for entry in tuple_envs:
@@ -118,7 +105,7 @@ def _remove_envs():
         'LD_LIBRARY_PATH'
     ]
     try:
-        for key, value in os.environ.items():
+        for key in os.environ:
             if key not in required_envs:
                 del os.environ[key]
     except:

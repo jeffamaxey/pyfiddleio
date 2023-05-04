@@ -61,8 +61,13 @@ RELOP = '([<>=!~]=)|[<>]'
 #
 # The first relop is optional - if absent, will be taken as '~='
 #
-BARE_CONSTRAINTS = ('(' + RELOP + r')?\s*(' + VERSPEC + ')(' + COMMA + '(' +
-                    RELOP + r')\s*(' + VERSPEC + '))*')
+BARE_CONSTRAINTS = (
+    (
+        (f'({RELOP}' + r')?\s*(' + VERSPEC + ')(' + COMMA + '(' + RELOP)
+        + r')\s*('
+    )
+    + VERSPEC
+) + '))*'
 
 DIRECT_REF = '(from\s+(?P<diref>.*))'
 
@@ -72,16 +77,17 @@ DIRECT_REF = '(from\s+(?P<diref>.*))'
 CONSTRAINTS = (r'\(\s*(?P<c1>' + BARE_CONSTRAINTS + '|' + DIRECT_REF +
                r')\s*\)|(?P<c2>' + BARE_CONSTRAINTS + '\s*)')
 
-EXTRA_LIST = EXTRA_IDENT + '(' + COMMA + EXTRA_IDENT + ')*'
+EXTRA_LIST = f'{EXTRA_IDENT}({COMMA}{EXTRA_IDENT})*'
 EXTRAS = r'\[\s*(?P<ex>' + EXTRA_LIST + r')?\s*\]'
-REQUIREMENT = ('(?P<dn>'  + IDENT + r')\s*(' + EXTRAS + r'\s*)?(\s*' +
-               CONSTRAINTS + ')?$')
+REQUIREMENT = (
+    f'(?P<dn>{IDENT}' + r')\s*(' + EXTRAS + r'\s*)?(\s*' + CONSTRAINTS
+) + ')?$'
 REQUIREMENT_RE = re.compile(REQUIREMENT)
 
 #
 # Used to scan through the constraints
 #
-RELOP_IDENT = '(?P<op>' + RELOP + r')\s*(?P<vn>' + VERSPEC + ')'
+RELOP_IDENT = f'(?P<op>{RELOP}' + r')\s*(?P<vn>' + VERSPEC + ')'
 RELOP_IDENT_RE = re.compile(RELOP_IDENT)
 
 def parse_requirement(s):
@@ -108,14 +114,11 @@ def parse_requirement(s):
             rs = d['dn']
         else:
             if cons[0] not in '<>!=':
-                cons = '~=' + cons
+                cons = f'~={cons}'
             iterator = RELOP_IDENT_RE.finditer(cons)
             cons = [get_constraint(m) for m in iterator]
-            rs = '%s (%s)' % (name, ', '.join(['%s %s' % con for con in cons]))
-        if not d['ex']:
-            extras = None
-        else:
-            extras = COMMA_RE.split(d['ex'])
+            rs = f"{name} ({', '.join(['%s %s' % con for con in cons])})"
+        extras = COMMA_RE.split(d['ex']) if d['ex'] else None
         result = Container(name=name, constraints=cons, extras=extras,
                            requirement=rs, source=s, url=url)
     return result
@@ -144,18 +147,16 @@ def get_resources_dests(resources_root, rules):
                 else:
                     rel_path = get_rel_path(abs_base, abs_path)
                     rel_dest = dest.replace(os.path.sep, '/').rstrip('/')
-                    destinations[resource_file] = rel_dest + '/' + rel_path
+                    destinations[resource_file] = f'{rel_dest}/{rel_path}'
     return destinations
 
 
 def in_venv():
-    if hasattr(sys, 'real_prefix'):
-        # virtualenv venvs
-        result = True
-    else:
-        # PEP 405 venvs
-        result = sys.prefix != getattr(sys, 'base_prefix', sys.prefix)
-    return result
+    return (
+        True
+        if hasattr(sys, 'real_prefix')
+        else sys.prefix != getattr(sys, 'base_prefix', sys.prefix)
+    )
 
 
 def get_executable():
@@ -193,11 +194,7 @@ def proceed(prompt, allowed_chars, error_prompt=None, default=None):
 def extract_by_key(d, keys):
     if isinstance(keys, string_types):
         keys = keys.split()
-    result = {}
-    for key in keys:
-        if key in d:
-            result[key] = d[key]
-    return result
+    return {key: d[key] for key in keys if key in d}
 
 def read_exports(stream):
     if sys.version_info[0] >= 3:
@@ -211,7 +208,7 @@ def read_exports(stream):
         result = jdata['extensions']['python.exports']['exports']
         for group, entries in result.items():
             for k, v in entries.items():
-                s = '%s = %s' % (k, v)
+                s = f'{k} = {v}'
                 entry = get_export_entry(s)
                 assert entry is not None
                 entries[k] = entry
@@ -238,7 +235,7 @@ def read_exports(stream):
     for key in cp.sections():
         result[key] = entries = {}
         for name, value in cp.items(key):
-            s = '%s = %s' % (name, value)
+            s = f'{name} = {value}'
             entry = get_export_entry(s)
             assert entry is not None
             #entry.dist = self
@@ -255,12 +252,9 @@ def write_exports(exports, stream):
         # TODO check k, v for valid values
         cp.add_section(k)
         for entry in v.values():
-            if entry.suffix is None:
-                s = entry.prefix
-            else:
-                s = '%s:%s' % (entry.prefix, entry.suffix)
+            s = entry.prefix if entry.suffix is None else f'{entry.prefix}:{entry.suffix}'
             if entry.flags:
-                s = '%s [%s]' % (s, ', '.join(entry.flags))
+                s = f"{s} [{', '.join(entry.flags)}]"
             cp.set(k, entry.name, s)
     cp.write(stream)
 
@@ -322,16 +316,14 @@ def convert_path(pathname):
     if not pathname:
         return pathname
     if pathname[0] == '/':
-        raise ValueError("path '%s' cannot be absolute" % pathname)
+        raise ValueError(f"path '{pathname}' cannot be absolute")
     if pathname[-1] == '/':
-        raise ValueError("path '%s' cannot end with '/'" % pathname)
+        raise ValueError(f"path '{pathname}' cannot end with '/'")
 
     paths = pathname.split('/')
     while os.curdir in paths:
         paths.remove(os.curdir)
-    if not paths:
-        return os.curdir
-    return os.path.join(*paths)
+    return os.path.join(*paths) if paths else os.curdir
 
 
 class FileOperator(object):
@@ -364,10 +356,11 @@ class FileOperator(object):
         if not os.path.exists(source):
             raise DistlibException("file '%r' does not exist" %
                                    os.path.abspath(source))
-        if not os.path.exists(target):
-            return True
-
-        return os.stat(source).st_mtime > os.stat(target).st_mtime
+        return (
+            os.stat(source).st_mtime > os.stat(target).st_mtime
+            if os.path.exists(target)
+            else True
+        )
 
     def copy_file(self, infile, outfile, check=True):
         """Copy a file respecting dry-run and force flags.
@@ -378,11 +371,11 @@ class FileOperator(object):
             msg = None
             if check:
                 if os.path.islink(outfile):
-                    msg = '%s is a symlink' % outfile
+                    msg = f'{outfile} is a symlink'
                 elif os.path.exists(outfile) and not os.path.isfile(outfile):
-                    msg = '%s is a non-regular file' % outfile
+                    msg = f'{outfile} is a non-regular file'
             if msg:
-                raise ValueError(msg + ' which would be overwritten')
+                raise ValueError(f'{msg} which would be overwritten')
             shutil.copyfile(infile, outfile)
         self.record_as_written(outfile)
 
@@ -435,7 +428,7 @@ class FileOperator(object):
             self.ensured.add(path)
             d, f = os.path.split(path)
             self.ensure_dir(d)
-            logger.info('Creating %s' % path)
+            logger.info(f'Creating {path}')
             if not self.dry_run:
                 os.mkdir(path)
             if self.record:
@@ -456,25 +449,21 @@ class FileOperator(object):
         return dpath
 
     def ensure_removed(self, path):
-        if os.path.exists(path):
-            if os.path.isdir(path) and not os.path.islink(path):
-                logger.debug('Removing directory tree at %s', path)
-                if not self.dry_run:
-                    shutil.rmtree(path)
-                if self.record:
-                    if path in self.dirs_created:
-                        self.dirs_created.remove(path)
-            else:
-                if os.path.islink(path):
-                    s = 'link'
-                else:
-                    s = 'file'
-                logger.debug('Removing %s %s', s, path)
-                if not self.dry_run:
-                    os.remove(path)
-                if self.record:
-                    if path in self.files_written:
-                        self.files_written.remove(path)
+        if not os.path.exists(path):
+            return
+        if os.path.isdir(path) and not os.path.islink(path):
+            logger.debug('Removing directory tree at %s', path)
+            if not self.dry_run:
+                shutil.rmtree(path)
+            if self.record and path in self.dirs_created:
+                self.dirs_created.remove(path)
+        else:
+            s = 'link' if os.path.islink(path) else 'file'
+            logger.debug('Removing %s %s', s, path)
+            if not self.dry_run:
+                os.remove(path)
+            if self.record and path in self.files_written:
+                self.files_written.remove(path)
 
     def is_writable(self, path):
         result = False
@@ -508,8 +497,7 @@ class FileOperator(object):
             # reverse so that subdirs appear before their parents
             dirs = sorted(self.dirs_created, reverse=True)
             for d in dirs:
-                flist = os.listdir(d)
-                if flist:
+                if flist := os.listdir(d):
                     assert flist == ['__pycache__']
                     sd = os.path.join(d, flist[0])
                     os.rmdir(sd)
@@ -543,18 +531,19 @@ class ExportEntry(object):
         return resolve(self.prefix, self.suffix)
 
     def __repr__(self):  # pragma: no cover
-        return '<ExportEntry %s = %s:%s %s>' % (self.name, self.prefix,
-                                                self.suffix, self.flags)
+        return f'<ExportEntry {self.name} = {self.prefix}:{self.suffix} {self.flags}>'
 
     def __eq__(self, other):
-        if not isinstance(other, ExportEntry):
-            result = False
-        else:
-            result = (self.name == other.name and
-                      self.prefix == other.prefix and
-                      self.suffix == other.suffix and
-                      self.flags == other.flags)
-        return result
+        return (
+            (
+                self.name == other.name
+                and self.prefix == other.prefix
+                and self.suffix == other.suffix
+                and self.flags == other.flags
+            )
+            if isinstance(other, ExportEntry)
+            else False
+        )
 
     __hash__ = object.__hash__
 
@@ -565,33 +554,29 @@ ENTRY_RE = re.compile(r'''(?P<name>(\w|[-.+])+)
                       ''', re.VERBOSE)
 
 def get_export_entry(specification):
-    m = ENTRY_RE.search(specification)
-    if not m:
-        result = None
-        if '[' in specification or ']' in specification:
-            raise DistlibException("Invalid specification "
-                                   "'%s'" % specification)
-    else:
+    if m := ENTRY_RE.search(specification):
         d = m.groupdict()
         name = d['name']
         path = d['callable']
         colons = path.count(':')
         if colons == 0:
             prefix, suffix = path, None
-        else:
-            if colons != 1:
-                raise DistlibException("Invalid specification "
-                                       "'%s'" % specification)
+        elif colons == 1:
             prefix, suffix = path.split(':')
+        else:
+            raise DistlibException(f"Invalid specification '{specification}'")
         flags = d['flags']
         if flags is None:
             if '[' in specification or ']' in specification:
-                raise DistlibException("Invalid specification "
-                                       "'%s'" % specification)
+                raise DistlibException(f"Invalid specification '{specification}'")
             flags = []
         else:
             flags = [f.strip() for f in flags.split(',')]
         result = ExportEntry(name, prefix, suffix, flags)
+    else:
+        result = None
+        if '[' in specification or ']' in specification:
+            raise DistlibException(f"Invalid specification '{specification}'")
     return result
 
 
@@ -654,9 +639,7 @@ def path_to_cache_dir(path):
 
 
 def ensure_slash(s):
-    if not s.endswith('/'):
-        return s + '/'
-    return s
+    return s if s.endswith('/') else f'{s}/'
 
 
 def parse_credentials(netloc):
@@ -699,18 +682,15 @@ def split_filename(filename, project_name=None):
     result = None
     pyver = None
     filename = unquote(filename).replace(' ', '-')
-    m = PYTHON_VERSION.search(filename)
-    if m:
+    if m := PYTHON_VERSION.search(filename):
         pyver = m.group(1)
         filename = filename[:m.start()]
     if project_name and len(filename) > len(project_name) + 1:
-        m = re.match(re.escape(project_name) + r'\b', filename)
-        if m:
+        if m := re.match(re.escape(project_name) + r'\b', filename):
             n = m.end()
             result = filename[:n], filename[n + 1:], pyver
     if result is None:
-        m = PROJECT_NAME_AND_VERSION.match(filename)
-        if m:
+        if m := PROJECT_NAME_AND_VERSION.match(filename):
             result = m.group(1), m.group(3), pyver
     return result
 
@@ -746,12 +726,12 @@ def get_extras(requested, available):
         elif r.startswith('-'):
             unwanted = r[1:]
             if unwanted not in available:
-                logger.warning('undeclared extra: %s' % unwanted)
+                logger.warning(f'undeclared extra: {unwanted}')
             if unwanted in result:
                 result.remove(unwanted)
         else:
             if r not in available:
-                logger.warning('undeclared extra: %s' % r)
+                logger.warning(f'undeclared extra: {r}')
             result.add(r)
     return result
 #
@@ -781,13 +761,12 @@ def _get_external_data(url):
 _external_data_base_url = 'https://www.red-dove.com/pypi/projects/'
 
 def get_project_data(name):
-    url = '%s/%s/project.json' % (name[0].upper(), name)
+    url = f'{name[0].upper()}/{name}/project.json'
     url = urljoin(_external_data_base_url, url)
-    result = _get_external_data(url)
-    return result
+    return _get_external_data(url)
 
 def get_package_data(name, version):
-    url = '%s/%s/package-%s.json' % (name[0].upper(), name, version)
+    url = f'{name[0].upper()}/{name}/package-{version}.json'
     url = urljoin(_external_data_base_url, url)
     return _get_external_data(url)
 
@@ -959,9 +938,8 @@ class Sequencer(object):
         if not self.is_step(final):
             raise ValueError('Unknown: %r' % final)
         result = []
-        todo = []
         seen = set()
-        todo.append(final)
+        todo = [final]
         while todo:
             step = todo.pop(0)
             if step in seen:
@@ -1036,10 +1014,8 @@ class Sequencer(object):
         result = ['digraph G {']
         for succ in self._preds:
             preds = self._preds[succ]
-            for pred in preds:
-                result.append('  %s -> %s;' % (pred, succ))
-        for node in self._nodes:
-            result.append('  %s;' % node)
+            result.extend(f'  {pred} -> {succ};' for pred in preds)
+        result.extend(f'  {node};' for node in self._nodes)
         result.append('}')
         return '\n'.join(result)
 
@@ -1165,22 +1141,19 @@ class Progress(object):
     @property
     def percentage(self):
         if self.done:
-            result = '100 %'
+            return '100 %'
         elif self.max is None:
-            result = ' ?? %'
+            return ' ?? %'
         else:
             v = 100.0 * (self.cur - self.min) / (self.max - self.min)
-            result = '%3d %%' % v
-        return result
+            return '%3d %%' % v
 
     def format_duration(self, duration):
-        if (duration <= 0) and self.max is None or self.cur == self.min:
-            result = '??:??:??'
-        #elif duration < 1:
-        #    result = '--:--:--'
-        else:
-            result = time.strftime('%H:%M:%S', time.gmtime(duration))
-        return result
+        return (
+            '??:??:??'
+            if (duration <= 0) and self.max is None or self.cur == self.min
+            else time.strftime('%H:%M:%S', time.gmtime(duration))
+        )
 
     @property
     def ETA(self):
@@ -1199,14 +1172,11 @@ class Progress(object):
                 t = float(self.max - self.min)
                 t /= self.cur - self.min
                 t = (t - 1) * self.elapsed
-        return '%s: %s' % (prefix, self.format_duration(t))
+        return f'{prefix}: {self.format_duration(t)}'
 
     @property
     def speed(self):
-        if self.elapsed == 0:
-            result = 0.0
-        else:
-            result = (self.cur - self.min) / self.elapsed
+        result = 0.0 if self.elapsed == 0 else (self.cur - self.min) / self.elapsed
         for unit in UNITS:
             if result < 1000:
                 break
@@ -1239,26 +1209,22 @@ def _iglob(path_glob):
         assert len(rich_path_glob) == 3, rich_path_glob
         prefix, set, suffix = rich_path_glob
         for item in set.split(','):
-            for path in _iglob(''.join((prefix, item, suffix))):
-                yield path
+            yield from _iglob(''.join((prefix, item, suffix)))
+    elif '**' not in path_glob:
+        yield from std_iglob(path_glob)
     else:
-        if '**' not in path_glob:
-            for item in std_iglob(path_glob):
-                yield item
+        prefix, radical = path_glob.split('**', 1)
+        if prefix == '':
+            prefix = '.'
+        if radical == '':
+            radical = '*'
         else:
-            prefix, radical = path_glob.split('**', 1)
-            if prefix == '':
-                prefix = '.'
-            if radical == '':
-                radical = '*'
-            else:
-                # we support both
-                radical = radical.lstrip('/')
-                radical = radical.lstrip('\\')
-            for path, dir, files in os.walk(prefix):
-                path = os.path.normpath(path)
-                for fn in _iglob(os.path.join(path, radical)):
-                    yield fn
+            # we support both
+            radical = radical.lstrip('/')
+            radical = radical.lstrip('\\')
+        for path, dir, files in os.walk(prefix):
+            path = os.path.normpath(path)
+            yield from _iglob(os.path.join(path, radical))
 
 if ssl:
     from .compat import (HTTPSHandler as BaseHTTPSHandler, match_hostname,
@@ -1282,10 +1248,7 @@ if ssl:
 
             if not hasattr(ssl, 'SSLContext'):
                 # For 2.x
-                if self.ca_certs:
-                    cert_reqs = ssl.CERT_REQUIRED
-                else:
-                    cert_reqs = ssl.CERT_NONE
+                cert_reqs = ssl.CERT_REQUIRED if self.ca_certs else ssl.CERT_NONE
                 self.sock = ssl.wrap_socket(sock, self.key_file, self.cert_file,
                                             cert_reqs=cert_reqs,
                                             ssl_version=ssl.PROTOCOL_SSLv23,
@@ -1387,13 +1350,11 @@ class Transport(xmlrpclib.Transport):
     def make_connection(self, host):
         h, eh, x509 = self.get_host_info(host)
         if _ver_info == (2, 6):
-            result = HTTP(h, timeout=self.timeout)
-        else:
-            if not self._connection or host != self._connection[0]:
-                self._extra_headers = eh
-                self._connection = host, httplib.HTTPConnection(h)
-            result = self._connection[1]
-        return result
+            return HTTP(h, timeout=self.timeout)
+        if not self._connection or host != self._connection[0]:
+            self._extra_headers = eh
+            self._connection = host, httplib.HTTPConnection(h)
+        return self._connection[1]
 
 if ssl:
     class SafeTransport(xmlrpclib.SafeTransport):
@@ -1407,14 +1368,12 @@ if ssl:
                 kwargs = {}
             kwargs['timeout'] = self.timeout
             if _ver_info == (2, 6):
-                result = HTTPS(host, None, **kwargs)
-            else:
-                if not self._connection or host != self._connection[0]:
-                    self._extra_headers = eh
-                    self._connection = host, httplib.HTTPSConnection(h, None,
-                                                                     **kwargs)
-                result = self._connection[1]
-            return result
+                return HTTPS(host, None, **kwargs)
+            if not self._connection or host != self._connection[0]:
+                self._extra_headers = eh
+                self._connection = host, httplib.HTTPSConnection(h, None,
+                                                                 **kwargs)
+            return self._connection[1]
 
 
 class ServerProxy(xmlrpclib.ServerProxy):
@@ -1425,10 +1384,7 @@ class ServerProxy(xmlrpclib.ServerProxy):
         if timeout is not None:
             scheme, _ = splittype(uri)
             use_datetime = kwargs.get('use_datetime', 0)
-            if scheme == 'https':
-                tcls = SafeTransport
-            else:
-                tcls = Transport
+            tcls = SafeTransport if scheme == 'https' else Transport
             kwargs['transport'] = t = tcls(timeout, use_datetime=use_datetime)
             self.transport = t
         xmlrpclib.ServerProxy.__init__(self, uri, **kwargs)
@@ -1535,7 +1491,7 @@ class Configurator(BaseConfigurator):
         # Check for valid identifiers
         args = config.pop('[]', ())
         if args:
-            args = tuple([convert(o) for o in args])
+            args = tuple(convert(o) for o in args)
         items = [(k, convert(config[k])) for k in config if valid_ident(k)]
         kwargs = dict(items)
         result = c(*args, **kwargs)

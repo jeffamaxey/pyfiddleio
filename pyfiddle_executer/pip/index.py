@@ -92,10 +92,11 @@ class InstallationCandidate(object):
         return self._compare(other, lambda s, o: s != o)
 
     def _compare(self, other, method):
-        if not isinstance(other, InstallationCandidate):
-            return NotImplemented
-
-        return method(self._key, other._key)
+        return (
+            method(self._key, other._key)
+            if isinstance(other, InstallationCandidate)
+            else NotImplemented
+        )
 
 
 class PackageFinder(object):
@@ -225,10 +226,7 @@ class PackageFinder(object):
             is_file_url = url.startswith('file:')
 
             if is_local_path or is_file_url:
-                if is_local_path:
-                    path = url
-                else:
-                    path = url_to_path(url)
+                path = url if is_local_path else url_to_path(url)
                 if os.path.isdir(path):
                     if expand_dir:
                         path = os.path.realpath(path)
@@ -265,7 +263,6 @@ class PackageFinder(object):
               comparison operators, but then different sdist links
               with the same version, would have to be considered equal
         """
-        support_num = len(self.valid_tags)
         if candidate.location.is_wheel:
             # can raise InvalidWheelFilename
             wheel = Wheel(candidate.location.filename)
@@ -276,6 +273,7 @@ class PackageFinder(object):
                 )
             pri = -(wheel.support_index_min(self.valid_tags))
         else:  # sdist
+            support_num = len(self.valid_tags)
             pri = -(support_num)
         return (candidate.version, pri)
 
@@ -294,7 +292,7 @@ class PackageFinder(object):
         # hardcoded list of secure origins, as well as any additional ones
         # configured on this PackageFinder instance.
         for secure_origin in (SECURE_ORIGINS + self.secure_origins):
-            if protocol != secure_origin[0] and secure_origin[0] != "*":
+            if protocol != secure_origin[0] != "*":
                 continue
 
             try:
@@ -367,7 +365,7 @@ class PackageFinder(object):
             # implementations might break if they relied on easy_install's
             # behavior.
             if not loc.endswith('/'):
-                loc = loc + '/'
+                loc = f'{loc}/'
             return loc
 
         return [mkurl_pypi_url(url) for url in self.index_urls]
@@ -481,12 +479,12 @@ class PackageFinder(object):
                 ),
             )
         )
-        applicable_candidates = [
+        if applicable_candidates := [
             # Again, converting to str to deal with debundling.
-            c for c in all_candidates if str(c.version) in compatible_versions
-        ]
-
-        if applicable_candidates:
+            c
+            for c in all_candidates
+            if str(c.version) in compatible_versions
+        ]:
             best_candidate = max(applicable_candidates,
                                  key=self._candidate_sort_key)
         else:
@@ -504,22 +502,20 @@ class PackageFinder(object):
                 req,
                 ', '.join(
                     sorted(
-                        set(str(c.version) for c in all_candidates),
-                        key=parse_version,
+                        {str(c.version) for c in all_candidates}, key=parse_version
                     )
-                )
+                ),
             )
 
-            raise DistributionNotFound(
-                'No matching distribution found for %s' % req
+            raise DistributionNotFound(f'No matching distribution found for {req}')
+
+        best_installed = bool(
+            installed_version
+            and (
+                best_candidate is None
+                or best_candidate.version <= installed_version
             )
-
-        best_installed = False
-        if installed_version and (
-                best_candidate is None or
-                best_candidate.version <= installed_version):
-            best_installed = True
-
+        )
         if not upgrade and installed_version is not None:
             if best_installed:
                 logger.debug(
@@ -614,12 +610,10 @@ class PackageFinder(object):
                 self._log_skipped_link(link, 'not a file')
                 return
             if ext not in SUPPORTED_EXTENSIONS:
-                self._log_skipped_link(
-                    link, 'unsupported archive format: %s' % ext)
+                self._log_skipped_link(link, f'unsupported archive format: {ext}')
                 return
             if "binary" not in search.formats and ext == wheel_ext:
-                self._log_skipped_link(
-                    link, 'No binaries permitted for %s' % search.supplied)
+                self._log_skipped_link(link, f'No binaries permitted for {search.supplied}')
                 return
             if "macosx10" in link.path and ext == '.zip':
                 self._log_skipped_link(link, 'macosx10 one')
@@ -631,8 +625,7 @@ class PackageFinder(object):
                     self._log_skipped_link(link, 'invalid wheel filename')
                     return
                 if canonicalize_name(wheel.name) != search.canonical:
-                    self._log_skipped_link(
-                        link, 'wrong project name (not %s)' % search.supplied)
+                    self._log_skipped_link(link, f'wrong project name (not {search.supplied})')
                     return
 
                 if not wheel.supported(self.valid_tags):
@@ -644,19 +637,16 @@ class PackageFinder(object):
 
         # This should be up by the search.ok_binary check, but see issue 2700.
         if "source" not in search.formats and ext != wheel_ext:
-            self._log_skipped_link(
-                link, 'No sources permitted for %s' % search.supplied)
+            self._log_skipped_link(link, f'No sources permitted for {search.supplied}')
             return
 
         if not version:
             version = egg_info_matches(egg_info, search.supplied, link)
         if version is None:
-            self._log_skipped_link(
-                link, 'wrong project name (not %s)' % search.supplied)
+            self._log_skipped_link(link, f'wrong project name (not {search.supplied})')
             return
 
-        match = self._py_version_re.search(version)
-        if match:
+        if match := self._py_version_re.search(version):
             version = version[:match.start()]
             py_version = match.group(1)
             if py_version != sys.version[:3]:
@@ -705,11 +695,8 @@ def egg_info_matches(
     # To match the "safe" name that pkg_resources creates:
     name = name.replace('_', '-')
     # project name and version must be separated by a dash
-    look_for = search_name.lower() + "-"
-    if name.startswith(look_for):
-        return match.group(0)[len(look_for):]
-    else:
-        return None
+    look_for = f"{search_name.lower()}-"
+    return match.group(0)[len(look_for):] if name.startswith(look_for) else None
 
 
 class HTMLPage(object):
@@ -763,19 +750,18 @@ class HTMLPage(object):
                         )
                         if content_type.lower().startswith('text/html'):
                             break
-                        else:
-                            logger.debug(
-                                'Skipping page %s because of Content-Type: %s',
-                                link,
-                                content_type,
-                            )
-                            return
+                        logger.debug(
+                            'Skipping page %s because of Content-Type: %s',
+                            link,
+                            content_type,
+                        )
+                        return
 
             logger.debug('Getting page %s', url)
 
             # Tack index.html onto file:// URLs that point to directories
             (scheme, netloc, path, params, query, fragment) = \
-                urllib_parse.urlparse(url)
+                    urllib_parse.urlparse(url)
             if (scheme == 'file' and
                     os.path.isdir(urllib_request.url2pathname(path))):
                 # add trailing slash if not present so urljoin doesn't trim
@@ -816,7 +802,7 @@ class HTMLPage(object):
                       "%s" % exc)
             cls._handle_fail(link, reason, url, meth=logger.info)
         except requests.ConnectionError as exc:
-            cls._handle_fail(link, "connection error: %s" % exc, url)
+            cls._handle_fail(link, f"connection error: {exc}", url)
         except requests.Timeout:
             cls._handle_fail(link, "timed out", url)
         else:
@@ -849,10 +835,7 @@ class HTMLPage(object):
             x for x in self.parsed.findall(".//base")
             if x.get("href") is not None
         ]
-        if bases and bases[0].get("href"):
-            return bases[0].get("href")
-        else:
-            return self.url
+        return bases[0].get("href") if bases and bases[0].get("href") else self.url
 
     @property
     def links(self):
@@ -902,47 +885,35 @@ class Link(object):
         self.requires_python = requires_python if requires_python else None
 
     def __str__(self):
-        if self.requires_python:
-            rp = ' (requires-python:%s)' % self.requires_python
-        else:
-            rp = ''
-        if self.comes_from:
-            return '%s (from %s)%s' % (self.url, self.comes_from, rp)
-        else:
+        if not self.comes_from:
             return str(self.url)
+        rp = (
+            f' (requires-python:{self.requires_python})'
+            if self.requires_python
+            else ''
+        )
+        return f'{self.url} (from {self.comes_from}){rp}'
 
     def __repr__(self):
-        return '<Link %s>' % self
+        return f'<Link {self}>'
 
     def __eq__(self, other):
-        if not isinstance(other, Link):
-            return NotImplemented
-        return self.url == other.url
+        return self.url == other.url if isinstance(other, Link) else NotImplemented
 
     def __ne__(self, other):
-        if not isinstance(other, Link):
-            return NotImplemented
-        return self.url != other.url
+        return self.url != other.url if isinstance(other, Link) else NotImplemented
 
     def __lt__(self, other):
-        if not isinstance(other, Link):
-            return NotImplemented
-        return self.url < other.url
+        return self.url < other.url if isinstance(other, Link) else NotImplemented
 
     def __le__(self, other):
-        if not isinstance(other, Link):
-            return NotImplemented
-        return self.url <= other.url
+        return self.url <= other.url if isinstance(other, Link) else NotImplemented
 
     def __gt__(self, other):
-        if not isinstance(other, Link):
-            return NotImplemented
-        return self.url > other.url
+        return self.url > other.url if isinstance(other, Link) else NotImplemented
 
     def __ge__(self, other):
-        if not isinstance(other, Link):
-            return NotImplemented
-        return self.url >= other.url
+        return self.url >= other.url if isinstance(other, Link) else NotImplemented
 
     def __hash__(self):
         return hash(self.url)
@@ -984,18 +955,14 @@ class Link(object):
     @property
     def egg_fragment(self):
         match = self._egg_fragment_re.search(self.url)
-        if not match:
-            return None
-        return match.group(1)
+        return match.group(1) if match else None
 
     _subdirectory_fragment_re = re.compile(r'[#&]subdirectory=([^&]*)')
 
     @property
     def subdirectory_fragment(self):
         match = self._subdirectory_fragment_re.search(self.url)
-        if not match:
-            return None
-        return match.group(1)
+        return match.group(1) if match else None
 
     _hash_re = re.compile(
         r'(sha1|sha224|sha384|sha256|sha512|md5)=([a-f0-9]+)'
@@ -1003,17 +970,11 @@ class Link(object):
 
     @property
     def hash(self):
-        match = self._hash_re.search(self.url)
-        if match:
-            return match.group(2)
-        return None
+        return match.group(2) if (match := self._hash_re.search(self.url)) else None
 
     @property
     def hash_name(self):
-        match = self._hash_re.search(self.url)
-        if match:
-            return match.group(1)
-        return None
+        return match.group(1) if (match := self._hash_re.search(self.url)) else None
 
     @property
     def show_url(self):
@@ -1031,10 +992,7 @@ class Link(object):
         """
         from pip.vcs import vcs
 
-        if self.scheme in vcs.all_schemes:
-            return False
-
-        return True
+        return self.scheme not in vcs.all_schemes
 
 
 FormatControl = namedtuple('FormatControl', 'no_binary only_binary')
@@ -1067,14 +1025,14 @@ def fmt_ctl_handle_mutual_exclude(value, target, other):
 
 
 def fmt_ctl_formats(fmt_ctl, canonical_name):
-    result = set(["binary", "source"])
-    if canonical_name in fmt_ctl.only_binary:
+    result = {"binary", "source"}
+    if (
+        canonical_name in fmt_ctl.only_binary
+        or canonical_name not in fmt_ctl.no_binary
+        and ':all:' in fmt_ctl.only_binary
+    ):
         result.discard('source')
-    elif canonical_name in fmt_ctl.no_binary:
-        result.discard('binary')
-    elif ':all:' in fmt_ctl.only_binary:
-        result.discard('source')
-    elif ':all:' in fmt_ctl.no_binary:
+    elif canonical_name in fmt_ctl.no_binary or ':all:' in fmt_ctl.no_binary:
         result.discard('binary')
     return frozenset(result)
 

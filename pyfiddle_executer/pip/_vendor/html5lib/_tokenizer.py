@@ -153,7 +153,7 @@ class HTMLTokenizer(object):
 
             # charStack[-1] should be the first digit
             if (hex and charStack[-1] in hexDigits) \
-                    or (not hex and charStack[-1] in digits):
+                        or (not hex and charStack[-1] in digits):
                 # At least one digit found, so consume the whole number
                 self.stream.unget(charStack[-1])
                 output = self.consumeNumberEntity(hex)
@@ -208,10 +208,7 @@ class HTMLTokenizer(object):
         if fromAttribute:
             self.currentToken["data"][-1][1] += output
         else:
-            if output in spaceCharacters:
-                tokenType = "SpaceCharacters"
-            else:
-                tokenType = "Characters"
+            tokenType = "SpaceCharacters" if output in spaceCharacters else "Characters"
             self.tokenQueue.append({"type": tokenTypes[tokenType], "data": output})
 
     def processEntityInAttribute(self, allowedChar):
@@ -483,8 +480,12 @@ class HTMLTokenizer(object):
         elif data in asciiLetters:
             self.temporaryBuffer += data
         else:
-            self.tokenQueue.append({"type": tokenTypes["Characters"],
-                                    "data": "</" + self.temporaryBuffer})
+            self.tokenQueue.append(
+                {
+                    "type": tokenTypes["Characters"],
+                    "data": f"</{self.temporaryBuffer}",
+                }
+            )
             self.stream.unget(data)
             self.state = self.rcdataState
         return True
@@ -533,8 +534,12 @@ class HTMLTokenizer(object):
         elif data in asciiLetters:
             self.temporaryBuffer += data
         else:
-            self.tokenQueue.append({"type": tokenTypes["Characters"],
-                                    "data": "</" + self.temporaryBuffer})
+            self.tokenQueue.append(
+                {
+                    "type": tokenTypes["Characters"],
+                    "data": f"</{self.temporaryBuffer}",
+                }
+            )
             self.stream.unget(data)
             self.state = self.rawtextState
         return True
@@ -586,8 +591,12 @@ class HTMLTokenizer(object):
         elif data in asciiLetters:
             self.temporaryBuffer += data
         else:
-            self.tokenQueue.append({"type": tokenTypes["Characters"],
-                                    "data": "</" + self.temporaryBuffer})
+            self.tokenQueue.append(
+                {
+                    "type": tokenTypes["Characters"],
+                    "data": f"</{self.temporaryBuffer}",
+                }
+            )
             self.stream.unget(data)
             self.state = self.scriptDataState
         return True
@@ -680,7 +689,7 @@ class HTMLTokenizer(object):
             self.temporaryBuffer = ""
             self.state = self.scriptDataEscapedEndTagOpenState
         elif data in asciiLetters:
-            self.tokenQueue.append({"type": tokenTypes["Characters"], "data": "<" + data})
+            self.tokenQueue.append({"type": tokenTypes["Characters"], "data": f"<{data}"})
             self.temporaryBuffer = data
             self.state = self.scriptDataDoubleEscapeStartState
         else:
@@ -722,8 +731,12 @@ class HTMLTokenizer(object):
         elif data in asciiLetters:
             self.temporaryBuffer += data
         else:
-            self.tokenQueue.append({"type": tokenTypes["Characters"],
-                                    "data": "</" + self.temporaryBuffer})
+            self.tokenQueue.append(
+                {
+                    "type": tokenTypes["Characters"],
+                    "data": f"</{self.temporaryBuffer}",
+                }
+            )
             self.stream.unget(data)
             self.state = self.scriptDataEscapedState
         return True
@@ -1193,7 +1206,7 @@ class HTMLTokenizer(object):
             self.tokenQueue.append(self.currentToken)
             self.state = self.dataState
         else:
-            self.currentToken["data"] += "-" + data
+            self.currentToken["data"] += f"-{data}"
             self.state = self.commentState
         return True
 
@@ -1230,7 +1243,7 @@ class HTMLTokenizer(object):
             self.tokenQueue.append(self.currentToken)
             self.state = self.dataState
         else:
-            self.currentToken["data"] += "-" + data
+            self.currentToken["data"] += f"-{data}"
             self.state = self.commentState
         return True
 
@@ -1261,7 +1274,7 @@ class HTMLTokenizer(object):
             # XXX
             self.tokenQueue.append({"type": tokenTypes["ParseError"], "data":
                                     "unexpected-char-in-comment"})
-            self.currentToken["data"] += "--" + data
+            self.currentToken["data"] += f"--{data}"
             self.state = self.commentState
         return True
 
@@ -1284,7 +1297,7 @@ class HTMLTokenizer(object):
             self.tokenQueue.append(self.currentToken)
             self.state = self.dataState
         else:
-            self.currentToken["data"] += "--!" + data
+            self.currentToken["data"] += f"--!{data}"
             self.state = self.commentState
         return True
 
@@ -1686,25 +1699,21 @@ class HTMLTokenizer(object):
             self.stream.unget(data)
             self.tokenQueue.append(self.currentToken)
             self.state = self.dataState
-        else:
-            pass
         return True
 
     def cdataSectionState(self):
         data = []
         while True:
-            data.append(self.stream.charsUntil("]"))
-            data.append(self.stream.charsUntil(">"))
+            data.extend((self.stream.charsUntil("]"), self.stream.charsUntil(">")))
             char = self.stream.char()
             if char == EOF:
                 break
+            assert char == ">"
+            if data[-1][-2:] == "]]":
+                data[-1] = data[-1][:-2]
+                break
             else:
-                assert char == ">"
-                if data[-1][-2:] == "]]":
-                    data[-1] = data[-1][:-2]
-                    break
-                else:
-                    data.append(char)
+                data.append(char)
 
         data = "".join(data)  # pylint:disable=redefined-variable-type
         # Deal with null here rather than in the parser

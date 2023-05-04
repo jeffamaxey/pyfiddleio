@@ -50,6 +50,8 @@ def getDomBuilder(DomImplementation):
             else:
                 del self.element.attributes[name]
 
+
+
     class NodeBuilder(base.Node):
         def __init__(self, element):
             base.Node.__init__(self, element.nodeName)
@@ -92,15 +94,13 @@ def getDomBuilder(DomImplementation):
             if attributes:
                 for name, value in list(attributes.items()):
                     if isinstance(name, tuple):
-                        if name[0] is not None:
-                            qualifiedName = (name[0] + ":" + name[1])
-                        else:
-                            qualifiedName = name[1]
+                        qualifiedName = f"{name[0]}:{name[1]}" if name[0] is not None else name[1]
                         self.element.setAttributeNS(name[2], qualifiedName,
                                                     value)
                     else:
                         self.element.setAttribute(
                             name, value)
+
         attributes = property(getAttributes, setAttributes)
 
         def cloneNode(self):
@@ -116,6 +116,9 @@ def getDomBuilder(DomImplementation):
                 return self.namespace, self.name
 
         nameTuple = property(getNameTuple)
+
+
+
 
     class TreeBuilder(base.TreeBuilder):  # pylint:disable=unused-variable
         def documentClass(self):
@@ -165,15 +168,17 @@ def getDomBuilder(DomImplementation):
                 base.TreeBuilder.insertText(self, data, parent)
             else:
                 # HACK: allow text nodes as children of the document node
-                if hasattr(self.dom, '_child_node_types'):
-                    # pylint:disable=protected-access
-                    if Node.TEXT_NODE not in self.dom._child_node_types:
-                        self.dom._child_node_types = list(self.dom._child_node_types)
-                        self.dom._child_node_types.append(Node.TEXT_NODE)
+                if (
+                    hasattr(self.dom, '_child_node_types')
+                    and Node.TEXT_NODE not in self.dom._child_node_types
+                ):
+                    self.dom._child_node_types = list(self.dom._child_node_types)
+                    self.dom._child_node_types.append(Node.TEXT_NODE)
                 self.dom.appendChild(self.dom.createTextNode(data))
 
         implementation = DomImplementation
         name = None
+
 
     def testSerializer(element):
         element.normalize()
@@ -185,28 +190,28 @@ def getDomBuilder(DomImplementation):
                     if element.publicId or element.systemId:
                         publicId = element.publicId or ""
                         systemId = element.systemId or ""
-                        rv.append("""|%s<!DOCTYPE %s "%s" "%s">""" %
-                                  (' ' * indent, element.name, publicId, systemId))
+                        rv.append(
+                            f"""|{' ' * indent}<!DOCTYPE {element.name} "{publicId}" "{systemId}">"""
+                        )
                     else:
-                        rv.append("|%s<!DOCTYPE %s>" % (' ' * indent, element.name))
+                        rv.append(f"|{' ' * indent}<!DOCTYPE {element.name}>")
                 else:
-                    rv.append("|%s<!DOCTYPE >" % (' ' * indent,))
+                    rv.append(f"|{' ' * indent}<!DOCTYPE >")
             elif element.nodeType == Node.DOCUMENT_NODE:
                 rv.append("#document")
             elif element.nodeType == Node.DOCUMENT_FRAGMENT_NODE:
                 rv.append("#document-fragment")
             elif element.nodeType == Node.COMMENT_NODE:
-                rv.append("|%s<!-- %s -->" % (' ' * indent, element.nodeValue))
+                rv.append(f"|{' ' * indent}<!-- {element.nodeValue} -->")
             elif element.nodeType == Node.TEXT_NODE:
                 rv.append("|%s\"%s\"" % (' ' * indent, element.nodeValue))
             else:
                 if (hasattr(element, "namespaceURI") and
                         element.namespaceURI is not None):
-                    name = "%s %s" % (constants.prefixes[element.namespaceURI],
-                                      element.nodeName)
+                    name = f"{constants.prefixes[element.namespaceURI]} {element.nodeName}"
                 else:
                     name = element.nodeName
-                rv.append("|%s<%s>" % (' ' * indent, name))
+                rv.append(f"|{' ' * indent}<{name}>")
                 if element.hasAttributes():
                     attributes = []
                     for i in range(len(element.attributes)):
@@ -214,17 +219,15 @@ def getDomBuilder(DomImplementation):
                         name = attr.nodeName
                         value = attr.value
                         ns = attr.namespaceURI
-                        if ns:
-                            name = "%s %s" % (constants.prefixes[ns], attr.localName)
-                        else:
-                            name = attr.nodeName
+                        name = f"{constants.prefixes[ns]} {attr.localName}" if ns else attr.nodeName
                         attributes.append((name, value))
 
                     for name, value in sorted(attributes):
-                        rv.append('|%s%s="%s"' % (' ' * (indent + 2), name, value))
+                        rv.append(f"""|{' ' * (indent + 2)}{name}="{value}\"""")
             indent += 2
             for child in element.childNodes:
                 serializeElement(child, indent)
+
         serializeElement(element, 0)
 
         return "\n".join(rv)

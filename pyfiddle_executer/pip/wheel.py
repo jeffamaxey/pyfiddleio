@@ -229,11 +229,9 @@ def get_entrypoints(filename):
     cp.readfp(data)
 
     console = {}
-    gui = {}
     if cp.has_section('console_scripts'):
         console = dict(cp.items('console_scripts'))
-    if cp.has_section('gui_scripts'):
-        gui = dict(cp.items('gui_scripts'))
+    gui = dict(cp.items('gui_scripts')) if cp.has_section('gui_scripts') else {}
     return console, gui
 
 
